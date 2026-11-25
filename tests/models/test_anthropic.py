@@ -7313,6 +7313,37 @@ async def test_anthropic_api_version_2023_06_01_keeps_sampling_settings(allow_mo
     assert kwargs['extra_body'] == {'temperature': 0}
 
 
+def _sonnet_with_api_versions(client_version: str, request_version: str) -> tuple[AsyncAnthropic, Agent[None, str]]:
+    responses = [
+        completion_message([BetaTextBlock(text='4', type='text')], usage=BetaUsage(input_tokens=10, output_tokens=1))
+    ]
+    mock_client = cast(
+        AsyncAnthropic, MockAnthropic(messages_=responses, default_headers={'anthropic-version': client_version})
+    )
+    m = AnthropicModel('claude-sonnet-4-6', provider=AnthropicProvider(anthropic_client=mock_client))
+    settings = AnthropicModelSettings(temperature=0, extra_headers={'Anthropic-Version': request_version})
+    return mock_client, Agent(m, model_settings=settings)
+
+
+async def test_anthropic_api_version_2023_06_01_in_extra_headers_keeps_sampling_settings(allow_model_requests: None):
+    mock_client, agent = _sonnet_with_api_versions('2026-10-21', '2023-06-01')
+
+    await agent.run('What is 2+2?')
+
+    kwargs = get_mock_chat_completion_kwargs(mock_client)[0]
+    assert kwargs['extra_body'] == {'temperature': 0}
+
+
+async def test_anthropic_api_version_2026_10_21_in_extra_headers_drops_sampling_settings(allow_model_requests: None):
+    mock_client, agent = _sonnet_with_api_versions('2023-06-01', '2026-10-21')
+
+    with pytest.warns(UserWarning, match='Sampling parameters'):
+        await agent.run('What is 2+2?')
+
+    kwargs = get_mock_chat_completion_kwargs(mock_client)[0]
+    assert 'temperature' not in (kwargs.get('extra_body') or {})
+
+
 async def test_anthropic_explicit_extra_body_overrides_the_sampling_setting(allow_model_requests: None):
     """A user's own `extra_body` entry wins over the `ModelSettings` field of the same name.
 
